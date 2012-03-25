@@ -1,5 +1,5 @@
 (function() {
-  var app, express, generateUser, getUserDetails, io, mustache, rc, redis, redis_store, sessions, tmpl, viewPath;
+  var app, express, fillMessageData, generateUser, getUserDetails, io, mustache, pushMessage, rc, redis, redis_store, sessions, tmpl, viewPath;
   express = require('express');
   mustache = require("./mustache.js");
   io = require('socket.io');
@@ -55,8 +55,12 @@
   sessions = {};
   rc = redis.createClient();
   generateUser = function(cb) {
-    return rc.incr('userkey', function(e, obj) {
-      return cb(obj);
+    return rc.incr('userkey', function(e, uk) {
+      rc.hset('uk:' + uk, {
+        'userkey': uk
+      });
+      rc.lpush('global.users', uk);
+      return cb(uk);
     });
   };
   getUserDetails = function(uk, cb, err_cb) {
@@ -70,6 +74,60 @@
       }
     });
   };
+  fillMessageData = function(messages, cb) {
+    var msg, multi, uklist, _i, _len;
+    multi = rc.multi();
+    uklist = {};
+    for (_i = 0, _len = messages.length; _i < _len; _i++) {
+      msg = messages[_i];
+      if (uklist[msg.userkey] != null) {
+        continue;
+      }
+      multi.hgetall('uk:' + msg.userkey);
+      uklist[msg.userkey] = '1';
+    }
+    return multi.exec(function(err, replies) {
+      var i, msg, r, ukmap, _j, _k, _len2, _len3;
+      i = 0;
+      console.log('multireplies', replies);
+      ukmap = {};
+      for (_j = 0, _len2 = replies.length; _j < _len2; _j++) {
+        r = replies[_j];
+        ukmap[r.userkey] = r.name;
+      }
+      for (_k = 0, _len3 = messages.length; _k < _len3; _k++) {
+        msg = messages[_k];
+        messages[i].username = ukmap[messages[i].userkey];
+        i += 1;
+      }
+      return cb(messages);
+    });
+  };
+  pushMessage = function(message) {
+    var chid;
+    chid = message.chid;
+    if (!(sessions[chid] != null)) {
+      return;
+    }
+    return fillMessageData([message], function(messages) {
+      var m, s, _i, _len, _ref, _results;
+      _ref = sessions[chid];
+      _results = [];
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        s = _ref[_i];
+        _results.push((function() {
+          var _j, _len2, _results2;
+          _results2 = [];
+          for (_j = 0, _len2 = messages.length; _j < _len2; _j++) {
+            m = messages[_j];
+            _results2.push(s.emit('message', m));
+          }
+          return _results2;
+        })());
+      }
+      return _results;
+    });
+  };
   io = io.listen(app);
   io.sockets.on('connection', function(socket) {
     socket.on('connect', function(data) {
@@ -81,18 +139,10 @@
       return sessions[chid].push(socket);
     });
     return socket.on('message', function(data) {
-      var chid, s, _i, _len, _ref, _results;
+      var chid;
       chid = data.chid;
       rc.lpush('session:' + chid, JSON.stringify(data));
-      if (sessions[chid] != null) {
-        _ref = sessions[chid];
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          s = _ref[_i];
-          _results.push(s.emit('message', data));
-        }
-        return _results;
-      }
+      return pushMessage(data);
     });
   });
   app.get('/', function(req, resp) {
@@ -103,16 +153,29 @@
     chid = req.params.chid;
     history = [];
     return rc.lrange('session:' + chid, 0, 100, function(e, objlist) {
-      var obj, _i, _len;
+      var obj;
       if (e != null) {
         console.log('Error', e);
+        resp.json(e);
       } else {
-        for (_i = 0, _len = objlist.length; _i < _len; _i++) {
-          obj = objlist[_i];
-          history.push(JSON.parse(obj));
-        }
+        objlist = (function() {
+          var _i, _len, _results;
+          _results = [];
+          for (_i = 0, _len = objlist.length; _i < _len; _i++) {
+            obj = objlist[_i];
+            _results.push(JSON.parse(obj));
+          }
+          return _results;
+        })();
+        return fillMessageData(objlist, function(messages) {
+          var obj, _i, _len;
+          for (_i = 0, _len = messages.length; _i < _len; _i++) {
+            obj = messages[_i];
+            history.push(obj);
+          }
+          return resp.json(history);
+        });
       }
-      return resp.json(history);
     });
   });
   app.get('/updateuser/:userkey', function(req, resp) {

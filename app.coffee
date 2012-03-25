@@ -46,8 +46,10 @@ sessions = {}
 rc = redis.createClient()
 
 generateUser =  (cb) ->
-	rc.incr 'userkey',(e,obj) ->
-		cb obj
+	rc.incr 'userkey',(e,uk) ->
+		rc.hset 'uk:' + uk,{'userkey':uk}
+		rc.lpush 'global.users',uk
+		cb uk
 
 getUserDetails = (uk,cb,err_cb) ->
 	rc.hgetall 'uk:' + uk,(err,obj) ->
@@ -55,6 +57,32 @@ getUserDetails = (uk,cb,err_cb) ->
 			if err_cb? then err_cb err
 		else 
 			cb(obj)
+
+fillMessageData = (messages,cb) ->
+	multi = rc.multi()
+	uklist = {}
+	for msg in messages
+		if uklist[msg.userkey]? then continue
+		multi.hgetall 'uk:' + msg.userkey
+		uklist[msg.userkey] = '1'
+	multi.exec (err,replies) ->
+		i = 0
+		console.log 'multireplies',replies
+		ukmap = {}
+		for r in replies
+			ukmap[r.userkey] = r.name
+		for msg in messages
+			messages[i].username = ukmap[messages[i].userkey]
+			i += 1
+		cb(messages)
+
+pushMessage = (message) ->
+	chid = message.chid
+	if not sessions[chid]? then return
+	fillMessageData [message],(messages) ->
+		for s in sessions[chid]
+			for m in messages
+				s.emit 'message',m
 
 io = io.listen app
 io.sockets.on 'connection', (socket) ->
@@ -67,10 +95,7 @@ io.sockets.on 'connection', (socket) ->
 	socket.on 'message',(data) ->
 		chid = data.chid
 		rc.lpush 'session:' + chid,JSON.stringify data
-
-		if sessions[chid]?
-			for s in sessions[chid]
-				s.emit 'message',data
+		pushMessage data
 
 app.get '/', (req,resp) ->
 	resp.render 'index.html'
@@ -81,10 +106,14 @@ app.get '/:chid/history', (req,resp) ->
 	rc.lrange 'session:' + chid,0,100,(e,objlist) ->
 		if e?
 			console.log 'Error',e
+			resp.json e
+			return
 		else
-			for obj in objlist
-				history.push JSON.parse obj
-		resp.json history
+			objlist = (JSON.parse obj for obj in objlist)
+			fillMessageData objlist,(messages) ->
+				for obj in messages
+					history.push  obj
+				resp.json history
 
 app.get '/updateuser/:userkey', (req,resp) ->
 	if not req.session.userkey?

@@ -60,6 +60,7 @@ body {
 <script>
 var uname = '{{user.name}}';
 var uk = '{{userkey}}';
+var scroll_timer = null;
 function addMessage(data,focus) {
 	var msg = $('<div />').text(data.message).addClass('chatmessage');
 	var uname = data.username || "<unknown>";
@@ -69,8 +70,13 @@ function addMessage(data,focus) {
 	var container = $('<div />').addClass('chatbubble');
 	container.append(up,msg);
 	$('#chat').append(container);
-	if (!!focus)
-		container.get(0).scrollIntoView();
+	if (!!focus) {
+		if (!!scroll_timer) clearTimeout(scroll_timer);
+		setTimeout(function(){
+			container.get(0).scrollIntoView();
+			scroll_timer = null;
+		},100);
+	}
 }
 function sendTypedMessage() {
 	var txt = ($('#newmessage').val());
@@ -90,7 +96,6 @@ function load() {
 	socket = io.connect(location.origin);
 	socket.emit('connect',{'chid':'{{chid}}'});
 	socket.on('message',function(data){
-		console.log('Got news',data);
 		if (data.chid != '{{chid}}')
 			console.log('Error: chid mismatch','{{chid}}',data);
 		addMessage(data,true);
