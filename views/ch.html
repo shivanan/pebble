@@ -1,0 +1,148 @@
+<html>
+	<head>
+		<script src='http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js' ></script>
+		<script src='/socket.io/socket.io.js'></script>
+		<style>
+body {
+	font-family: Helvetica Neue,Verdana;
+}
+.content {
+	width: 960px;
+	margin-left: auto;
+	margin-right: auto;
+}
+.chatwindow {
+	min-height: 300px;
+	max-height: 300px;
+	overflow: auto;
+	width: 750px;
+	background-color: #EEE;
+	border: 1px solid gray;
+}
+.chatbubble {
+	padding:7px;
+	margin: 1px;
+	border-bottom: 1px solid #CCC;
+	font-size: 12px;
+}
+.chatbubble:hover {
+	background-color: #FFC;
+}
+.chatmessage {
+	display: inline-block;
+	margin-left: 10px;
+
+}
+.chatuser {
+	display:inline-block;
+	width: 100px;
+	text-align: right;
+	font-weight: bold;
+}
+.chatuser.unknown {
+	font-weight: normal;
+	font-style:italic;
+	color: #666;
+}
+.chatuser.current {
+	color: #5CCBFA;
+}
+#newmessage {
+	width: 400px;
+}
+#username {
+	font-size: 14px;
+	font-weight: bold;
+	border: 0px;
+}
+
+		</style>
+<script>
+var uname = '{{user.name}}';
+var uk = '{{userkey}}';
+function addMessage(data,focus) {
+	var msg = $('<div />').text(data.message).addClass('chatmessage');
+	var uname = data.username || "<unknown>";
+	var up = $('<div />').text(uname).addClass('chatuser');
+	if (!data.username) up.addClass('unknown');
+	if (data.userkey == uk) up.addClass('current');
+	var container = $('<div />').addClass('chatbubble');
+	container.append(up,msg);
+	$('#chat').append(container);
+	if (!!focus)
+		container.get(0).scrollIntoView();
+}
+function sendTypedMessage() {
+	var txt = ($('#newmessage').val());
+	sendMessage(txt);
+	$('#newmessage').val('').focus();
+}
+var socket = null;
+function sendMessage(txt) {
+	var obj = {'message':txt};
+	obj.chid = '{{chid}}';
+	obj.userkey = uk;
+	obj.username = uname;
+	socket.emit('message',obj);
+}
+function load() {
+	//var connection = new WebSocket('ws://' + location.host + '/{{chid}}');
+	socket = io.connect(location.origin);
+	socket.emit('connect',{'chid':'{{chid}}'});
+	socket.on('message',function(data){
+		console.log('Got news',data);
+		if (data.chid != '{{chid}}')
+			console.log('Error: chid mismatch','{{chid}}',data);
+		addMessage(data,true);
+	});
+	/*
+	connection.onmessage = function(obj) {
+		var message = JSON.parse(obj.data)
+		console.log('received message:',message);
+		$('#chat').append($('<div />').text(message.message));
+	}
+	*/
+	$('#send').click(function(evnt){
+		evnt.preventDefault();
+		evnt.stopPropagation();
+		sendTypedMessage();
+		//connection.send(JSON.stringify(txt));
+	});
+	$('#newmessage').keypress(function(evnt) {
+		if (evnt.which == 13) {
+			evnt.preventDefault();
+			sendTypedMessage();
+		}
+	});
+	$('#username').blur(function(){
+		var un = $('#username').val();
+		if (!un) {
+			$('#username').val(uname);
+			return;
+		}
+		uname = un;
+		$.getJSON('/updateuser/{{userkey}}',{'name':uname});
+
+	});
+	$.getJSON('/{{chid}}/history',function(messages,status,xhr){
+		for(var i=messages.length-1;i>=0;i--) {
+			addMessage(messages[i]);
+		}
+	});
+}
+$(load);
+</script>
+	</head>
+	<body>
+		<div class='content'>
+		<h2>Session {{chid}}</h2>
+		<div>User:<input  type='text' placeholder='Your Name' id='username' value='{{user.name}}' /></div>
+		<div id='chat' class='chatwindow' >
+		</div>
+		<div>
+			<input type='text' id='newmessage' value='' />
+			<button id='send'>Send</button>
+		</div>
+	</div>
+	</body>
+</html>
