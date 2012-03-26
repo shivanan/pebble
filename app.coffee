@@ -45,11 +45,20 @@ app.use express.static(__dirname+'/public')
 sessions = {}
 rc = redis.createClient()
 
-generateUser =  (cb) ->
-	rc.incr 'userkey',(e,uk) ->
-		rc.hset 'uk:' + uk,{'userkey':uk}
-		rc.lpush 'global.users',uk
-		cb uk
+EH = (resp) ->
+	(e) ->
+		resp.json e,500
+generateID = (prefix,err,cb) ->
+	console.log 'my err',err
+	rc.incr prefix,(e,uk) ->
+		if e? then err e
+		else cb uk
+generateUser =  (e,cb) ->
+	generateID 'userkey',e,() ->
+		rc.incr 'userkey',(e,uk) ->
+			rc.hset 'uk:' + uk,'userkey',uk
+			rc.lpush 'global.users',uk
+			cb uk
 
 getUserDetails = (uk,cb,err_cb) ->
 	rc.hgetall 'uk:' + uk,(err,obj) ->
@@ -141,7 +150,7 @@ app.get '/:chid', (req,resp) ->
 			resp.render 'ch.html', {locals:{'chid':ch_id,'userkey':req.session.userkey,'user':req.session.user ? {}}}
 	if not req.session.userkey?
 		console.log 'generating userkey'
-		generateUser (key) ->
+		generateUser EH(resp),(key) ->
 			req.session.userkey = key
 			handler req,resp
 	else

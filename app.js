@@ -1,5 +1,5 @@
 (function() {
-  var app, express, fillMessageData, generateUser, getUserDetails, io, mustache, pushMessage, rc, redis, redis_store, sessions, tmpl, viewPath;
+  var EH, app, express, fillMessageData, generateID, generateUser, getUserDetails, io, mustache, pushMessage, rc, redis, redis_store, sessions, tmpl, viewPath;
   express = require('express');
   mustache = require("./mustache.js");
   io = require('socket.io');
@@ -54,13 +54,28 @@
   app.use(express.static(__dirname + '/public'));
   sessions = {};
   rc = redis.createClient();
-  generateUser = function(cb) {
-    return rc.incr('userkey', function(e, uk) {
-      rc.hset('uk:' + uk, {
-        'userkey': uk
+  EH = function(resp) {
+    return function(e) {
+      return resp.json(e, 500);
+    };
+  };
+  generateID = function(prefix, err, cb) {
+    console.log('my err', err);
+    return rc.incr(prefix, function(e, uk) {
+      if (e != null) {
+        return err(e);
+      } else {
+        return cb(uk);
+      }
+    });
+  };
+  generateUser = function(e, cb) {
+    return generateID('userkey', e, function() {
+      return rc.incr('userkey', function(e, uk) {
+        rc.hset('uk:' + uk, 'userkey', uk);
+        rc.lpush('global.users', uk);
+        return cb(uk);
       });
-      rc.lpush('global.users', uk);
-      return cb(uk);
     });
   };
   getUserDetails = function(uk, cb, err_cb) {
@@ -226,7 +241,7 @@
     };
     if (!(req.session.userkey != null)) {
       console.log('generating userkey');
-      return generateUser(function(key) {
+      return generateUser(EH(resp), function(key) {
         req.session.userkey = key;
         return handler(req, resp);
       });
