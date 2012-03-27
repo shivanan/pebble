@@ -48,6 +48,7 @@ rc = redis.createClient()
 EH = (resp) ->
 	(e) ->
 		resp.json e,500
+		
 generateID = (prefix,err,cb) ->
 	console.log 'my err',err
 	rc.incr prefix,(e,uk) ->
