@@ -3,6 +3,8 @@ mustache = require("./mustache.js");
 io = require('socket.io')
 redis = require('redis')
 redis_store = require('connect-redis')(express)
+bcrypt = require('bcrypt')
+
 
 
 tmpl = 
@@ -49,17 +51,72 @@ EH = (resp) ->
 	(e) ->
 		resp.json e,500
 		
-generateID = (prefix,err,cb) ->
-	console.log 'my err',err
-	rc.incr prefix,(e,uk) ->
-		if e? then err e
-		else cb uk
+generateID = (prefix,cb) ->
+	rc.incr prefix, (e,uk) ->
+		cb e,uk
+
+###
 generateUser =  (e,cb) ->
 	generateID 'userkey',e,() ->
 		rc.incr 'userkey',(e,uk) ->
 			rc.hset 'uk:' + uk,'userkey',uk
 			rc.lpush 'global.users',uk
 			cb uk
+
+###
+ERR = (msg) ->
+	{'message':msg}
+createUser = (details,cb) ->
+	if not details.email then cb ERR 'No email address specified'
+
+	email = details.email
+
+	await rc.sismember 'emails',email,defer exists
+	if exists == 1 then cb ERR "Email address #{email} exists"
+
+	await generateID 'userkey',defer e,uk
+	if e? then return cb e,null
+
+	await bcrypt.genSalt 10, defer e,salt
+	if e? then return cb e,null
+	console.log 'my salt',salt
+
+	await bcrypt.hash details.password,salt,defer e,hash
+	if e? then return cb e,null
+
+	rc.hset 'user:' + uk,'userkey',uk
+	rc.hset 'user:' + uk,'name',details.name
+	rc.hset 'user:' + uk,'password',hash
+	rc.hset 'user:' + uk,'email',email
+
+	rc.set 'useremail:' + email,uk
+	user = 
+		userkey: uk
+		name: details.name
+		password: hash
+		email: email
+	
+	cb null,user
+
+verifyUser = (email,password,cb) ->
+	await rc.get 'useremail:' + email, defer e,uk
+	if e? then return cb e,null
+
+	if not uk then return cb ERR 'No such user'
+
+
+	await rc.hgetall 'user:' + uk,defer e,user
+	if e? then return cb e,null
+	
+	actual_password = user.password
+
+	await bcrypt.compare password,actual_password, defer e,ok
+	if e? then return cb e,null
+
+	if not ok then return cb ERR 'Invalid email address or password'
+
+	cb null,user
+
 
 getUserDetails = (uk,cb,err_cb) ->
 	rc.hgetall 'uk:' + uk,(err,obj) ->
@@ -110,6 +167,17 @@ io.sockets.on 'connection', (socket) ->
 app.get '/', (req,resp) ->
 	resp.render 'index.html'
 
+app.post '/createuser', (req,resp) ->
+	un = req.query.name
+	pwd = req.query.password
+	await createUser {name:un,password:pwd},defer e,user
+	if e?
+		resp.json e,500
+		return
+	resp.json user
+
+
+
 app.get '/:chid/history', (req,resp) ->
 	chid = req.params.chid
 	history = []
@@ -159,4 +227,12 @@ app.get '/:chid', (req,resp) ->
 		handler req,resp
 
 
-app.listen 81
+###
+createUser {'name':'haran','password':'password','email':'shivanan@statictype.org'},(e,details) ->
+	if e? then console.log 'Error',e
+	else console.log 'created user',details
+###
+await verifyUser 'shivanan@statictype.org','password',defer e,user
+if e? then console.log 'Error',e
+else console.log 'Valid User',user
+#app.listen 81
