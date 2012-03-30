@@ -67,12 +67,14 @@ generateUser =  (e,cb) ->
 ERR = (msg) ->
 	{'message':msg}
 createUser = (details,cb) ->
-	if not details.email then cb ERR 'No email address specified'
+	if not details.email then return cb ERR 'No email address specified'
 
 	email = details.email
 
-	await rc.sismember 'emails',email,defer exists
-	if exists == 1 then cb ERR "Email address #{email} exists"
+	await rc.sismember 'emails',email,defer e,exists
+	if exists == 1 then return cb ERR "Email address #{email} exists"
+
+	await rc.sadd 'emails',email,defer e,ok
 
 	await generateID 'userkey',defer e,uk
 	if e? then return cb e,null
@@ -96,7 +98,7 @@ createUser = (details,cb) ->
 		password: hash
 		email: email
 	
-	cb null,user
+	return cb null,user
 
 verifyUser = (email,password,cb) ->
 	await rc.get 'useremail:' + email, defer e,uk
@@ -116,6 +118,12 @@ verifyUser = (email,password,cb) ->
 	if not ok then return cb ERR 'Invalid email address or password'
 
 	cb null,user
+
+createUserSession = (uk,cb) ->
+	await generateID 'session',defer e,sid
+	if e? then return cb e
+
+	rc.set 'sesssion:' + sid
 
 
 getUserDetails = (uk,cb,err_cb) ->
@@ -170,7 +178,8 @@ app.get '/', (req,resp) ->
 app.post '/createuser', (req,resp) ->
 	un = req.query.name
 	pwd = req.query.password
-	await createUser {name:un,password:pwd},defer e,user
+	email = req.query.email
+	await createUser {name:un,password:pwd,email:email},defer e,user
 	if e?
 		resp.json e,500
 		return
@@ -227,7 +236,6 @@ app.get '/:chid', (req,resp) ->
 		handler req,resp
 
 
-###
 createUser {'name':'haran','password':'password','email':'shivanan@statictype.org'},(e,details) ->
 	if e? then console.log 'Error',e
 	else console.log 'created user',details
@@ -235,4 +243,5 @@ createUser {'name':'haran','password':'password','email':'shivanan@statictype.or
 await verifyUser 'shivanan@statictype.org','password',defer e,user
 if e? then console.log 'Error',e
 else console.log 'Valid User',user
+###
 #app.listen 81
