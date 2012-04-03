@@ -123,7 +123,11 @@ createUserSession = (uk,cb) ->
 	await generateID 'session',defer e,sid
 	if e? then return cb e
 
-	rc.set 'sesssion:' + sid
+	#TODO: expiry?
+	rc.set 'sesssion:' + sid,uk,defer e,r
+	if e? then return cb e
+
+	return cb null,sid
 
 
 getUserDetails = (uk,cb,err_cb) ->
@@ -134,11 +138,12 @@ getUserDetails = (uk,cb,err_cb) ->
 			cb(obj)
 
 fillMessageData = (messages,cb) ->
+	console.log 'fillin message',messages
 	multi = rc.multi()
 	uklist = {}
 	for msg in messages
 		if uklist[msg.userkey]? then continue
-		multi.hgetall 'uk:' + msg.userkey
+		multi.hgetall 'user:' + msg.userkey
 		uklist[msg.userkey] = '1'
 	multi.exec (err,replies) ->
 		i = 0
@@ -172,6 +177,7 @@ io.sockets.on 'connection', (socket) ->
 		rc.lpush 'session:' + chid,JSON.stringify data
 		pushMessage data
 
+
 app.get '/', (req,resp) ->
 	resp.render 'index.html'
 
@@ -186,6 +192,14 @@ app.post '/createuser', (req,resp) ->
 	resp.json user
 
 
+authUser = (req,resp,next) ->
+	s = req.session?.sessionid
+	if not s? 
+		req.session?.sessionid = null
+		req.session?.user = null
+		resp.redirect('/login?next=' + encodeURIComponent(req.path))
+	else 
+		next()
 
 app.get '/:chid/history', (req,resp) ->
 	chid = req.params.chid
@@ -214,7 +228,48 @@ app.get '/updateuser/:userkey', (req,resp) ->
 			console.log 'error',err
 			resp.json(err,400)
 
-app.get '/:chid', (req,resp) ->
+app.get '/login', (req,resp) ->
+	next = req.query.next
+	resp.render 'login.html',{locals:{next:next}}
+app.post '/login', (req,resp) ->
+	console.log req.body
+	login = req.body.login
+	next = req.body.next
+	pwd = req.body.password
+	await verifyUser login,pwd,defer e,user
+	console.log 'user verified',e,user
+	if e?
+		resp.render 'login.html',{locals:{'error':e,'login':login,next:next}}
+		return
+	await createUserSession user.userkey,defer e,sid
+	if e?
+		resp.render 'login.html',{locals:{'error':e,'login':login,next:next}}
+		return
+	req.session.user = user
+	req.session.sessionid = sid
+	resp.redirect(next)
+app.post '/signup', (req,resp) ->
+	login = req.body.newlogin
+	password = req.body.newpassword
+	name = req.body.newname
+	next = req.body.next
+
+	err_handler = (e) ->
+		resp.render 'login.html',{locals:{newlogin:login,newname:name,next:next,signuperror:e}}
+
+	if not name then return err_handler ERR 'Name is required'
+	if not login then return err_handler ERR 'A valid email address is required'
+	
+	await createUser {'name':name,'email':login,password:password}, defer e,user
+	if e? then return err_handler e
+	await createUserSession user.userkey,defer e,sid
+	if e? then return err_handler e
+	req.session.user = user
+	req.session.sessionid = sid
+	resp.redirect next
+
+
+app.get '/:chid', authUser,(req,resp) ->
 	handler = (req,resp) ->
 		ch_id = req.params.chid
 		history = []
@@ -225,23 +280,17 @@ app.get '/:chid', (req,resp) ->
 				for obj in objlist
 					history.push
 						'item':obj
-			resp.render 'ch.html', {locals:{'chid':ch_id,'userkey':req.session.userkey,'user':req.session.user ? {}}}
-	if not req.session.userkey?
-		console.log 'generating userkey'
-		generateUser EH(resp),(key) ->
-			req.session.userkey = key
-			handler req,resp
-	else
-		console.log 'got user key',req.session.userkey
-		handler req,resp
+			resp.render 'ch.html', {locals:{'chid':ch_id,'userkey':req.session.user.userkey,'user':req.session.user ? {}}}
+	console.log 'got user key',req.session.userkey
+	handler req,resp
 
 
-createUser {'name':'haran','password':'password','email':'shivanan@statictype.org'},(e,details) ->
+###
+createUser {'name':'hs','password':'password','email':'h.shivanan@gmail.com'},(e,details) ->
 	if e? then console.log 'Error',e
 	else console.log 'created user',details
-###
-await verifyUser 'shivanan@statictype.org','password',defer e,user
+await verifyUser 'shivanan@statictype.org','pas1sword',defer e,user
 if e? then console.log 'Error',e
 else console.log 'Valid User',user
 ###
-#app.listen 81
+app.listen 81

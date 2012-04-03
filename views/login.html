@@ -1,0 +1,38 @@
+<html>
+	<body>
+		{{#error}}
+		<span style='color:red;'>{{error.message}}</span>
+		{{/error}}
+		<form action='/login' method='post'>
+			<input type='hidden'  name='next' value='{{next}}' />
+			<div>
+				Email: <input type='text' id='login' name='login' value='{{login}}' />
+			</div>
+			<div>
+				Password: <input type='text' id='password' name='password' value='' />
+			</div>
+			<div>
+				<input type='submit' />
+			</div>
+		</form>
+		<div> or sign up:</div>
+		{{#signuperror}}
+		<span style='color:red;'>{{signuperror.message}}</span>
+		{{/signuperror}}
+		<form action='/signup' method='post'>
+			<input type='hidden'  name='next' value='{{next}}' />
+			<div>
+				Email: <input type='text' id='newlogin' name='newlogin' value='{{newlogin}}' />
+			</div>
+			<div>
+				Password: <input type='text' id='newpassword' name='newpassword' value='' />
+			</div>
+			<div>
+				Name: <input type='text' id='newname' name='newname' value='{{newname}}' />
+			</div>
+			<div>
+				<input type='submit' />
+			</div>
+		</form>
+	</body>
+</html>
