@@ -66,6 +66,27 @@ generateUser =  (e,cb) ->
 ###
 ERR = (msg) ->
 	{'message':msg}
+createRoom = (details,cb) ->
+	if not details.name then cb ERR 'No name specified for the room'
+	if not details.created_userkey then cb ERR 'No created user specified'
+	name = details.name
+	uk = details.created_userkey
+
+	await generateID 'room',defer e,rk
+	if e? then return cb e
+
+	rc.hset 'room:' + rk,'roomkey',rk
+	rc.hset 'room:' + rk,'created_userkey',uk
+	rc.hset 'room:' + rk,'name',name
+	rc.sadd 'room.users:' + rk,uk
+	cb null,rk
+
+roomHasUser = (rk,uk,cb) ->
+	await rc.sismember 'room.users:' + rk,uk,defer e,exists
+	if e? then return cb e
+	return cb null,exists==1
+
+
 createUser = (details,cb) ->
 	if not details.email then return cb ERR 'No email address specified'
 
