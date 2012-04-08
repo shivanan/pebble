@@ -4,7 +4,10 @@ io = require('socket.io')
 redis = require('redis')
 redis_store = require('connect-redis')(express)
 bcrypt = require('bcrypt')
+crypto = require('crypto')
 
+hash = (txt) ->
+	crypto.createHash('sha256').update(txt).encoding('hex')
 
 
 tmpl = 
@@ -121,6 +124,60 @@ createUser = (details,cb) ->
 	
 	return cb null,user
 
+createAccount = (details,cb) ->
+	account = details.accountid
+	uk = details.userkey
+	if not account then cb ERR 'No account name specified'
+	if not uk then cb ERR 'No user associated with the account'
+
+	await rc.sismember 'accounts',account,defer e,exists
+	if e? then return cb e
+	if exists ==1 then return cb ERR 'An account with this name already exists'
+
+	rc.hmset 'account:' + account,{'accountid':account,'created_userkey':uk}
+	rc.sadd 'accountusers:' + account,uk
+	cb null,account
+
+createPendingAction = (action,details,cb) ->
+	await rc.generateID 'action',defer e,key
+	if e? then cb e
+	h = hash key
+	awat rc.hmset 'action:' + h,details,defer e,whatever
+	if e? then cb e
+	cb null,hash
+
+
+executePendingAction = (actionhash,cb) ->
+	await rc.hgetall 'action:' + actionhash,defer e,details
+	if not e? then cb e
+	if not details then cb ERR 'Invalid Action'
+	executeAction details,cb
+
+executeAction = (details,cb) ->
+	switch details.action
+		when 'useraccountlink'
+			accountid = details.accountid
+			uk = details.uk
+			if not accountid? then cb ERR 'Invalid Account'
+			if not uk? then cb ERR 'Invalid user for account'
+			return linkUserToAccount accountid,uk,cb
+		else
+			cb ERR 'Invalid action:' + details.action
+
+linkUserToAccount = (accountid,uk,cb) ->
+	await rc.sismember 'accounts',accountid,defer e,exists
+	if e? then cb e
+	if exists!=1 then cb ERR 'Invalid account:' + accountid
+
+	await getUserDetails uk,defer e,userdetails
+	if e? then cb e
+	if not userdetails then cb ERR 'Invalid user'
+	
+	rc.sadd 'accountusers:' + accountid,uk,cb
+
+
+getUserDetails = (uk,cb) ->
+	rc.hgetall 'user:' + uk,cb
 verifyUser = (email,password,cb) ->
 	await rc.get 'useremail:' + email, defer e,uk
 	if e? then return cb e,null
@@ -237,17 +294,6 @@ app.get '/:chid/history', (req,resp) ->
 					history.push  obj
 				resp.json history
 
-app.get '/updateuser/:userkey', (req,resp) ->
-	if not req.session.userkey?
-		resp.json({"error":"no such user"},400)
-	name = req.query.name
-	rc.hset 'uk:' + req.session.userkey,'name',name
-	getUserDetails req.session.userkey,(obj) ->
-			req.session.user = obj
-			resp.json({"status":"ok"},200)
-		,(err) ->
-			console.log 'error',err
-			resp.json(err,400)
 
 app.get '/login', (req,resp) ->
 	next = req.query.next
